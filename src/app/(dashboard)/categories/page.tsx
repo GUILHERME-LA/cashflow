@@ -1,8 +1,8 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { Plus, Pencil, Trash2, Loader2, X } from "lucide-react"
+import { Plus, Pencil, Trash2, Loader2, X, Check } from "lucide-react"
 import type { Category } from "@/types"
 
 const defaultColors = [
@@ -22,65 +22,108 @@ export default function CategoriesPage() {
     color: defaultColors[0],
   })
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
   const supabase = createClient()
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg)
+    setTimeout(() => setToast(null), 3000)
+  }, [])
+
+  const loadCategories = useCallback(async () => {
+    setLoading(true)
+    try {
+      const { data, error: loadErr } = await supabase
+        .from("categories")
+        .select("*")
+        .order("type")
+        .order("name")
+      if (loadErr) throw loadErr
+      setCategories((data || []) as Category[])
+    } catch (err) {
+      console.error("Erro ao carregar categorias:", err)
+      setError("Erro ao carregar categorias")
+    } finally {
+      setLoading(false)
+    }
+  }, [supabase])
 
   useEffect(() => {
     loadCategories()
-  }, [])
-
-  async function loadCategories() {
-    setLoading(true)
-    const { data } = await supabase
-      .from("categories")
-      .select("*")
-      .order("type")
-      .order("name")
-    setCategories((data || []) as Category[])
-    setLoading(false)
-  }
+  }, [loadCategories])
 
   function openNew() {
     setEditCategory(null)
     setFormData({ name: "", type: "expense", color: defaultColors[0] })
+    setError(null)
     setShowForm(true)
   }
 
   function openEdit(cat: Category) {
     setEditCategory(cat)
     setFormData({ name: cat.name, type: cat.type, color: cat.color })
+    setError(null)
     setShowForm(true)
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setSaving(true)
+    setError(null)
 
+    const trimmedName = formData.name.trim()
+    if (!trimmedName) {
+      setError("Nome da categoria é obrigatório")
+      return
+    }
+
+    if (trimmedName.length > 100) {
+      setError("Nome muito longo (máximo 100 caracteres)")
+      return
+    }
+
+    setSaving(true)
     try {
       if (editCategory) {
-        await supabase
+        const { error: updateErr } = await supabase
           .from("categories")
-          .update({ name: formData.name, type: formData.type, color: formData.color })
+          .update({ name: trimmedName, type: formData.type, color: formData.color })
           .eq("id", editCategory.id)
+        if (updateErr) throw updateErr
+        showToast("Categoria atualizada com sucesso")
       } else {
-        await supabase.from("categories").insert({
-          name: formData.name,
+        const { error: insertErr } = await supabase.from("categories").insert({
+          name: trimmedName,
           type: formData.type,
           color: formData.color,
         })
+        if (insertErr) throw insertErr
+        showToast("Categoria criada com sucesso")
       }
       setShowForm(false)
       await loadCategories()
     } catch (err) {
-      console.error("Erro:", err)
+      console.error("Erro ao salvar categoria:", err)
+      const msg = err && typeof err === "object" && "message" in err
+        ? String((err as { message: string }).message)
+        : "Erro ao salvar categoria"
+      setError(msg)
     } finally {
       setSaving(false)
     }
   }
 
   async function handleDelete(cat: Category) {
-    if (!confirm(`Excluir "${cat.name}"?`)) return
-    await supabase.from("categories").delete().eq("id", cat.id)
-    await loadCategories()
+    if (!confirm(`Excluir a categoria "${cat.name}"? Transações associadas perderão a categoria.`)) return
+    try {
+      const { error: delErr } = await supabase.from("categories").delete().eq("id", cat.id)
+      if (delErr) throw delErr
+      showToast("Categoria excluída")
+      await loadCategories()
+    } catch (err) {
+      console.error("Erro ao excluir:", err)
+      showToast("Erro ao excluir categoria")
+    }
   }
 
   const revenueCategories = categories.filter((c) => c.type === "revenue")
@@ -88,6 +131,13 @@ export default function CategoriesPage() {
 
   return (
     <div className="space-y-6">
+      {toast && (
+        <div className="fixed top-20 right-4 z-50 flex items-center gap-2 bg-green-500 text-white px-4 py-3 rounded-xl shadow-lg animate-in fade-in slide-in-from-right-4">
+          <Check size={16} />
+          <span className="text-sm font-medium">{toast}</span>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Categorias</h2>
@@ -112,6 +162,13 @@ export default function CategoriesPage() {
               <X size={20} />
             </button>
           </div>
+
+          {error && (
+            <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3">
+              <p className="text-sm text-red-600">{error}</p>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -121,6 +178,8 @@ export default function CategoriesPage() {
                   onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
                   className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500"
                   required
+                  maxLength={100}
+                  autoFocus
                 />
               </div>
               <div>
@@ -176,22 +235,26 @@ export default function CategoriesPage() {
         <div className="flex items-center justify-center h-64">
           <Loader2 size={32} className="animate-spin text-green-500" />
         </div>
+      ) : categories.length === 0 ? (
+        <div className="bg-white border border-gray-200 rounded-2xl p-8 text-center text-gray-500 shadow-sm">
+          Nenhuma categoria encontrada. Crie a primeira!
+        </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
-            <h3 className="text-sm font-semibold text-green-600 mb-3">Receitas</h3>
+            <h3 className="text-sm font-semibold text-green-600 mb-3">Receitas ({revenueCategories.length})</h3>
             {revenueCategories.length === 0 ? (
-              <p className="text-sm text-gray-500">Nenhuma categoria</p>
+              <p className="text-sm text-gray-500">Nenhuma categoria de receita</p>
             ) : (
               <div className="space-y-2">
                 {revenueCategories.map((cat) => (
                   <div key={cat.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50">
-                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.color }} />
+                    <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
                     <span className="flex-1 text-sm text-gray-900">{cat.name}</span>
-                    <button onClick={() => openEdit(cat)} className="text-gray-400 hover:text-green-600">
+                    <button onClick={() => openEdit(cat)} className="text-gray-400 hover:text-green-600 p-1">
                       <Pencil size={14} />
                     </button>
-                    <button onClick={() => handleDelete(cat)} className="text-gray-400 hover:text-red-500">
+                    <button onClick={() => handleDelete(cat)} className="text-gray-400 hover:text-red-500 p-1">
                       <Trash2 size={14} />
                     </button>
                   </div>
@@ -201,19 +264,19 @@ export default function CategoriesPage() {
           </div>
 
           <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
-            <h3 className="text-sm font-semibold text-red-500 mb-3">Despesas</h3>
+            <h3 className="text-sm font-semibold text-red-500 mb-3">Despesas ({expenseCategories.length})</h3>
             {expenseCategories.length === 0 ? (
-              <p className="text-sm text-gray-500">Nenhuma categoria</p>
+              <p className="text-sm text-gray-500">Nenhuma categoria de despesa</p>
             ) : (
               <div className="space-y-2">
                 {expenseCategories.map((cat) => (
                   <div key={cat.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50">
-                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.color }} />
+                    <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
                     <span className="flex-1 text-sm text-gray-900">{cat.name}</span>
-                    <button onClick={() => openEdit(cat)} className="text-gray-400 hover:text-green-600">
+                    <button onClick={() => openEdit(cat)} className="text-gray-400 hover:text-green-600 p-1">
                       <Pencil size={14} />
                     </button>
-                    <button onClick={() => handleDelete(cat)} className="text-gray-400 hover:text-red-500">
+                    <button onClick={() => handleDelete(cat)} className="text-gray-400 hover:text-red-500 p-1">
                       <Trash2 size={14} />
                     </button>
                   </div>

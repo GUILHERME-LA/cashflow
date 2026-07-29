@@ -1,9 +1,9 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { TrendingUp, TrendingDown, ArrowUpDown, Loader2 } from "lucide-react"
-import { formatCurrency } from "@/lib/utils"
+import { formatCurrency, formatDate } from "@/lib/utils"
 import type { Transaction, FinanceiroSummary } from "@/types"
 
 export default function DashboardPage() {
@@ -19,11 +19,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const supabase = createClient()
 
-  useEffect(() => {
-    loadData()
-  }, [])
-
-  async function loadData() {
+  const loadData = useCallback(async () => {
     setLoading(true)
     try {
       const [txResult, summaryResult] = await Promise.all([
@@ -36,15 +32,18 @@ export default function DashboardPage() {
         supabase.from("transactions").select("type, value"),
       ])
 
+      if (txResult.error) throw txResult.error
+      if (summaryResult.error) throw summaryResult.error
+
       setRecentTransactions((txResult.data || []) as Transaction[])
 
       const txs = (summaryResult.data || []) as Pick<Transaction, "type" | "value">[]
       const totalRevenue = txs
         .filter((t) => t.type === "revenue")
-        .reduce((acc, t) => acc + (t.value || 0), 0)
+        .reduce((acc, t) => acc + (Number(t.value) || 0), 0)
       const totalExpense = txs
         .filter((t) => t.type === "expense")
-        .reduce((acc, t) => acc + (t.value || 0), 0)
+        .reduce((acc, t) => acc + (Number(t.value) || 0), 0)
 
       setSummary({
         totalRevenue,
@@ -59,7 +58,11 @@ export default function DashboardPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [supabase])
+
+  useEffect(() => {
+    loadData()
+  }, [loadData])
 
   const stats = [
     {
@@ -147,7 +150,7 @@ export default function DashboardPage() {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-gray-900 truncate">{tx.description}</p>
                   <p className="text-xs text-gray-500">
-                    {tx.who || "Sem destinatário"} • {tx.date}
+                    {tx.who || "Sem destinatário"} • {formatDate(tx.date)}
                   </p>
                 </div>
                 <p
@@ -155,7 +158,7 @@ export default function DashboardPage() {
                     tx.type === "revenue" ? "text-green-600" : "text-red-500"
                   }`}
                 >
-                  {tx.type === "revenue" ? "+" : "-"} {formatCurrency(tx.value)}
+                  {tx.type === "revenue" ? "+" : "-"} {formatCurrency(Number(tx.value) || 0)}
                 </p>
               </div>
             ))}

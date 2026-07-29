@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Download, Loader2, Calendar } from "lucide-react"
 import { formatCurrency, formatDate } from "@/lib/utils"
@@ -14,45 +14,47 @@ export default function ReportsPage() {
   const [filterType, setFilterType] = useState<string>("all")
   const supabase = createClient()
 
+  const loadData = useCallback(async () => {
+    setLoading(true)
+    try {
+      let query = supabase
+        .from("transactions")
+        .select("*, category:categories(name, type, color)")
+        .order("date", { ascending: false })
+
+      if (startDate) query = query.gte("date", startDate)
+      if (endDate) query = query.lte("date", endDate)
+      if (filterType !== "all") query = query.eq("type", filterType)
+
+      const { data, error } = await query
+      if (error) throw error
+      setTransactions((data || []) as Transaction[])
+    } catch (err) {
+      console.error("Erro ao carregar relatório:", err)
+    } finally {
+      setLoading(false)
+    }
+  }, [supabase, startDate, endDate, filterType])
+
   useEffect(() => {
     loadData()
-  }, [])
-
-  async function loadData() {
-    setLoading(true)
-    let query = supabase
-      .from("transactions")
-      .select("*, category:categories(name, type, color)")
-      .order("date", { ascending: false })
-
-    if (startDate) query = query.gte("date", startDate)
-    if (endDate) query = query.lte("date", endDate)
-    if (filterType !== "all") query = query.eq("type", filterType)
-
-    const { data } = await query
-    setTransactions((data || []) as Transaction[])
-    setLoading(false)
-  }
-
-  function handleFilter() {
-    loadData()
-  }
+  }, [loadData])
 
   function exportCSV() {
     const headers = ["Data", "Descrição", "Quem", "Valor", "Tipo", "Status", "Categoria", "Forma Pagamento"]
     const rows = transactions.map((tx) => [
       tx.date,
-      tx.description,
-      tx.who || "",
-      tx.value.toFixed(2),
+      `"${(tx.description || "").replace(/"/g, '""')}"`,
+      `"${(tx.who || "").replace(/"/g, '""')}"`,
+      (Number(tx.value) || 0).toFixed(2),
       tx.type === "revenue" ? "Receita" : "Despesa",
       tx.status,
-      tx.category?.name || "",
+      `"${(tx.category?.name || "").replace(/"/g, '""')}"`,
       tx.payment_method,
     ])
 
-    const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n")
-    const blob = new Blob([csv], { type: "text/csv" })
+    const csv = "\uFEFF" + [headers.join(";"), ...rows.map((r) => r.join(";"))].join("\n")
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
@@ -63,10 +65,10 @@ export default function ReportsPage() {
 
   const totalRevenue = transactions
     .filter((t) => t.type === "revenue")
-    .reduce((acc, t) => acc + t.value, 0)
+    .reduce((acc, t) => acc + (Number(t.value) || 0), 0)
   const totalExpense = transactions
     .filter((t) => t.type === "expense")
-    .reduce((acc, t) => acc + t.value, 0)
+    .reduce((acc, t) => acc + (Number(t.value) || 0), 0)
   const balance = totalRevenue - totalExpense
 
   return (
@@ -78,7 +80,8 @@ export default function ReportsPage() {
         </div>
         <button
           onClick={exportCSV}
-          className="flex items-center gap-2 rounded-xl bg-green-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-600 transition-colors"
+          disabled={transactions.length === 0}
+          className="flex items-center gap-2 rounded-xl bg-green-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-600 transition-colors disabled:opacity-50"
         >
           <Download size={16} />
           Exportar CSV
@@ -94,7 +97,6 @@ export default function ReportsPage() {
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
               className="px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700"
-              placeholder="Data início"
             />
           </div>
           <input
@@ -102,7 +104,6 @@ export default function ReportsPage() {
             value={endDate}
             onChange={(e) => setEndDate(e.target.value)}
             className="px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700"
-            placeholder="Data fim"
           />
           <select
             value={filterType}
@@ -113,12 +114,6 @@ export default function ReportsPage() {
             <option value="revenue">Receitas</option>
             <option value="expense">Despesas</option>
           </select>
-          <button
-            onClick={handleFilter}
-            className="px-4 py-2 rounded-lg bg-green-500 text-sm font-semibold text-white hover:bg-green-600"
-          >
-            Filtrar
-          </button>
         </div>
       </div>
 
@@ -126,10 +121,12 @@ export default function ReportsPage() {
         <div className="bg-white border border-gray-200 rounded-2xl p-4 text-center shadow-sm">
           <p className="text-xs text-gray-500 mb-1">Receitas</p>
           <p className="text-xl font-bold text-green-600">{formatCurrency(totalRevenue)}</p>
+          <p className="text-xs text-gray-400 mt-1">{transactions.filter((t) => t.type === "revenue").length} registros</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl p-4 text-center shadow-sm">
           <p className="text-xs text-gray-500 mb-1">Despesas</p>
           <p className="text-xl font-bold text-red-500">{formatCurrency(totalExpense)}</p>
+          <p className="text-xs text-gray-400 mt-1">{transactions.filter((t) => t.type === "expense").length} registros</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl p-4 text-center shadow-sm">
           <p className="text-xs text-gray-500 mb-1">Saldo</p>
@@ -142,6 +139,10 @@ export default function ReportsPage() {
       {loading ? (
         <div className="flex items-center justify-center h-64">
           <Loader2 size={32} className="animate-spin text-green-500" />
+        </div>
+      ) : transactions.length === 0 ? (
+        <div className="bg-white border border-gray-200 rounded-2xl p-8 text-center text-gray-500 shadow-sm">
+          Nenhuma transação encontrada para os filtros selecionados
         </div>
       ) : (
         <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
@@ -158,14 +159,14 @@ export default function ReportsPage() {
               </thead>
               <tbody>
                 {transactions.map((tx) => (
-                  <tr key={tx.id} className="border-b border-gray-100">
+                  <tr key={tx.id} className="border-b border-gray-100 hover:bg-gray-50">
                     <td className="py-3 px-4 text-gray-900">{formatDate(tx.date)}</td>
                     <td className="py-3 px-4 text-gray-900">{tx.description}</td>
                     <td className="py-3 px-4 text-gray-500">{tx.category?.name || "—"}</td>
                     <td className={`py-3 px-4 text-right font-semibold ${
                       tx.type === "revenue" ? "text-green-600" : "text-red-500"
                     }`}>
-                      {tx.type === "revenue" ? "+" : "-"} {formatCurrency(tx.value)}
+                      {tx.type === "revenue" ? "+" : "-"} {formatCurrency(Number(tx.value) || 0)}
                     </td>
                     <td className="py-3 px-4 text-center">
                       <span className={`text-xs ${
