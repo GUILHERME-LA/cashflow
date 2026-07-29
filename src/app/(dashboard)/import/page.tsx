@@ -217,6 +217,8 @@ export default function ImportPage() {
           const fileName = `${crypto.randomUUID()}.${ext}`
           const filePath = `receipts/${fileName}`
 
+          const { data: { user } } = await supabase.auth.getUser()
+
           const { error: uploadErr } = await supabase.storage
             .from("cashflow-proofs")
             .upload(filePath, row.file, {
@@ -225,14 +227,18 @@ export default function ImportPage() {
               upsert: false,
             })
 
-          if (!uploadErr) {
-            await supabase.from("proof_files").insert({
+          if (uploadErr) {
+            console.error("Erro no upload do comprovante:", uploadErr.message)
+          } else {
+            const { error: proofErr } = await supabase.from("proof_files").insert({
               filename: row.file.name,
               filepath: filePath,
               mimetype: row.file.type,
               size_bytes: row.file.size,
               transaction_id: newTx.id,
+              uploaded_by: user?.id || null,
             })
+            if (proofErr) console.error("Erro ao salvar referência do comprovante:", proofErr.message)
           }
         }
 

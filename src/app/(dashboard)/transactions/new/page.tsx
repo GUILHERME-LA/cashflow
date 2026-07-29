@@ -176,6 +176,8 @@ function NewTransactionForm() {
         const fileName = `${crypto.randomUUID()}.${ext}`
         const filePath = `receipts/${fileName}`
 
+        const { data: { user } } = await supabase.auth.getUser()
+
         const { error: uploadErr } = await supabase.storage
           .from("cashflow-proofs")
           .upload(filePath, file, {
@@ -184,14 +186,18 @@ function NewTransactionForm() {
             upsert: false,
           })
 
-        if (!uploadErr) {
-          await supabase.from("proof_files").insert({
+        if (uploadErr) {
+          console.error("Erro no upload do comprovante:", uploadErr.message)
+        } else {
+          const { error: proofErr } = await supabase.from("proof_files").insert({
             filename: file.name,
             filepath: filePath,
             mimetype: file.type,
             size_bytes: file.size,
             transaction_id: txId,
+            uploaded_by: user?.id || null,
           })
+          if (proofErr) console.error("Erro ao salvar referência do comprovante:", proofErr.message)
         }
       }
 
