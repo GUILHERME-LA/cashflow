@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { History, Loader2, User, ArrowRight, Pencil, PlusCircle, Trash2 } from "lucide-react"
 import { formatDateFull } from "@/lib/utils"
@@ -19,61 +19,57 @@ interface AuditEntry {
   user_email?: string
 }
 
+interface Lookups {
+  categories: Record<string, string>
+  users: Record<string, string>
+}
+
 function getActionConfig(action: string) {
   switch (action) {
     case "create":
-      return { icon: PlusCircle, color: "text-green-600", bg: "bg-green-50", label: "Criou" }
+      return { icon: PlusCircle, color: "text-green-600", bg: "bg-green-50", label: "Created" }
     case "update":
-      return { icon: Pencil, color: "text-blue-600", bg: "bg-blue-50", label: "Editou" }
+      return { icon: Pencil, color: "text-blue-600", bg: "bg-blue-50", label: "Updated" }
     case "delete":
-      return { icon: Trash2, color: "text-red-600", bg: "bg-red-50", label: "Excluiu" }
+      return { icon: Trash2, color: "text-red-600", bg: "bg-red-50", label: "Deleted" }
     default:
       return { icon: History, color: "text-gray-600", bg: "bg-gray-50", label: action }
   }
 }
 
 const FIELD_LABELS: Record<string, string> = {
-  type: "Tipo",
-  date: "Data",
-  description: "Descrição",
-  value: "Valor",
-  who: "Responsável",
-  payment_method: "Pagamento",
-  notes: "Notas",
-  status: "Status",
-  category_id: "Categoria",
-  updated_by: "Atualizado por",
+  type: "Type", date: "Date", description: "Description",
+  value: "Value", who: "Who", payment_method: "Payment",
+  notes: "Notes", status: "Status", category_id: "Category", updated_by: "Updated by",
 }
 
-function getFieldLabel(field: string): string {
-  return FIELD_LABELS[field] || field
+const PAYMENT_METHODS: Record<string, string> = {
+  dinheiro: "Cash", pix: "PIX", cartao: "Card",
+  boleto: "Boleto", transferencia: "Transfer",
+  credito: "Credit", debito: "Debit",
 }
 
-function formatValue(val: string | null, field: string): string {
+function formatValue(val: string | null, field: string, lookups: Lookups): string {
   if (!val || val === "NULL") return "—"
   if (field === "value") {
     const num = parseFloat(val)
     if (!isNaN(num)) return `R$ ${num.toFixed(2).replace(".", ",")}`
   }
-  if (field === "type") return val === "revenue" ? "Receita" : "Despesa"
+  if (field === "type") return val === "revenue" ? "Revenue" : "Expense"
   if (field === "status") {
-    const map: Record<string, string> = { pending: "Pendente", approved: "Aprovado", rejected: "Rejeitado" }
+    const map: Record<string, string> = { pending: "Pending", approved: "Approved", rejected: "Rejected" }
     return map[val] || val
   }
-  if (field === "payment_method") {
-    const map: Record<string, string> = {
-      dinheiro: "Dinheiro", pix: "PIX", cartao: "Cartão",
-      boleto: "Boleto", transferencia: "Transferência",
-      credito: "Crédito", debito: "Débito",
-    }
-    return map[val] || val
-  }
+  if (field === "payment_method") return PAYMENT_METHODS[val] || val
+  if (field === "category_id") return lookups.categories[val] || val
+  if (field === "updated_by") return lookups.users[val] || val
   return val.length > 50 ? val.substring(0, 50) + "..." : val
 }
 
 export default function AuditPage() {
   const [entries, setEntries] = useState<AuditEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const [lookups, setLookups] = useState<Lookups>({ categories: {}, users: {} })
   const supabase = createClient()
 
   useEffect(() => {
@@ -83,38 +79,22 @@ export default function AuditPage() {
   async function loadAudit() {
     setLoading(true)
 
-    const { data: logs } = await supabase
-      .from("audit_log")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(100)
+    const [logsRes, catsRes, usersRes] = await Promise.all([
+      supabase.from("audit_log").select("*").order("created_at", { ascending: false }).limit(100),
+      supabase.from("categories").select("id, name"),
+      supabase.from("users").select("id, name, email"),
+    ])
 
-    if (!logs || logs.length === 0) {
-      setEntries([])
-      setLoading(false)
-      return
+    const logs = logsRes.data || []
+    const lkps: Lookups = {
+      categories: Object.fromEntries((catsRes.data || []).map((c) => [c.id, c.name])),
+      users: Object.fromEntries((usersRes.data || []).map((u) => [u.id, u.name || u.email])),
     }
-
-    const userIds = [...new Set(logs.map((l) => l.performed_by).filter(Boolean))] as string[]
-
-    let usersMap: Record<string, { name: string; email: string }> = {}
-    if (userIds.length > 0) {
-      const { data: users } = await supabase
-        .from("users")
-        .select("id, name, email")
-        .in("id", userIds)
-
-      if (users) {
-        usersMap = Object.fromEntries(
-          users.map((u) => [u.id, { name: u.name || u.email, email: u.email }])
-        )
-      }
-    }
+    setLookups(lkps)
 
     const enriched = logs.map((log) => ({
       ...log,
-      user_name: log.performed_by ? usersMap[log.performed_by]?.name || "Usuário removido" : "Sistema",
-      user_email: log.performed_by ? usersMap[log.performed_by]?.email : null,
+      user_name: log.performed_by ? lkps.users[log.performed_by] || "Removed user" : "System",
     }))
 
     setEntries(enriched)
@@ -124,8 +104,8 @@ export default function AuditPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-gray-900">Histórico</h2>
-        <p className="text-sm text-gray-500 mt-1">Todas as ações realizadas no sistema</p>
+        <h2 className="text-2xl font-bold text-gray-900">History</h2>
+        <p className="text-sm text-gray-500 mt-1">All actions performed in the system</p>
       </div>
 
       {loading ? (
@@ -135,7 +115,7 @@ export default function AuditPage() {
       ) : entries.length === 0 ? (
         <div className="bg-white border border-gray-200 rounded-2xl p-8 text-center text-gray-500 shadow-sm">
           <History size={40} className="mx-auto mb-4 text-gray-300" />
-          Nenhuma ação registrada ainda
+          No actions recorded yet
         </div>
       ) : (
         <div className="space-y-3">
@@ -143,7 +123,6 @@ export default function AuditPage() {
             const config = getActionConfig(entry.action)
             const Icon = config.icon
             const isUpdate = entry.action === "update" && entry.field_changed
-            const isCreate = entry.action === "create"
 
             return (
               <div
@@ -166,19 +145,11 @@ export default function AuditPage() {
 
                     {isUpdate && (
                       <div className="mt-2 flex items-center gap-2 text-sm">
-                        <span className="text-gray-500 font-medium">{getFieldLabel(entry.field_changed!)}:</span>
-                        <span className="text-red-500 line-through text-xs">{formatValue(entry.old_value, entry.field_changed!)}</span>
+                        <span className="text-gray-500 font-medium">{FIELD_LABELS[entry.field_changed!] || entry.field_changed}:</span>
+                        <span className="text-red-500 line-through text-xs">{formatValue(entry.old_value, entry.field_changed!, lookups)}</span>
                         <ArrowRight size={12} className="text-gray-400 shrink-0" />
-                        <span className="text-green-600 font-medium text-xs">{formatValue(entry.new_value, entry.field_changed!)}</span>
+                        <span className="text-green-600 font-medium text-xs">{formatValue(entry.new_value, entry.field_changed!, lookups)}</span>
                       </div>
-                    )}
-
-                    {isCreate && (
-                      <p className="mt-1.5 text-sm text-gray-600">Nova transação criada</p>
-                    )}
-
-                    {entry.action === "delete" && (
-                      <p className="mt-1.5 text-sm text-gray-600">Transação excluída</p>
                     )}
 
                     <div className="mt-2 flex items-center gap-2 text-xs text-gray-400">
