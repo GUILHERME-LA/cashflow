@@ -1,32 +1,57 @@
 "use client"
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect, Suspense } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
-import { Loader2, DollarSign } from "lucide-react"
+import { Loader2, DollarSign, ShieldAlert } from "lucide-react"
 
-export default function LoginPage() {
+function LoginForm() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
+
+  useEffect(() => {
+    if (searchParams.get("error") === "no_access") {
+      setError("Você não tem acesso a este sistema. Entre em contato com o administrador.")
+    }
+  }, [searchParams])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError(null)
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error: authError } = await supabase.auth.signInWithPassword({
       email,
       password,
     })
 
-    if (error) {
-      setError(error.message)
+    if (authError) {
+      setError(authError.message)
       setLoading(false)
       return
+    }
+
+    if (data.user) {
+      const { data: roleCheck } = await supabase
+        .from("user_roles")
+        .select("role_id, roles!inner(name)")
+        .eq("user_id", data.user.id)
+
+      const roles = (roleCheck as unknown as Array<{ roles: { name: string } }>) ?? []
+      const roleNames = roles.map((r) => r.roles?.name).filter(Boolean)
+      const hasAccess = roleNames.includes("admin") || roleNames.includes("cashflow_user")
+
+      if (!hasAccess) {
+        await supabase.auth.signOut()
+        setError("Você não tem acesso a este sistema. Entre em contato com o administrador.")
+        setLoading(false)
+        return
+      }
     }
 
     router.push("/dashboard")
@@ -46,8 +71,17 @@ export default function LoginPage() {
 
         <form onSubmit={handleLogin} className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm space-y-4">
           {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-              <p className="text-sm text-red-600">{error}</p>
+            <div className={`border rounded-lg p-3 ${
+              error.includes("não tem acesso")
+                ? "bg-orange-50 border-orange-200"
+                : "bg-red-50 border-red-200"
+            }`}>
+              <div className="flex items-start gap-2">
+                {error.includes("não tem acesso") && <ShieldAlert size={16} className="text-orange-500 mt-0.5 shrink-0" />}
+                <p className={`text-sm ${error.includes("não tem acesso") ? "text-orange-600" : "text-red-600"}`}>
+                  {error}
+                </p>
+              </div>
             </div>
           )}
 
@@ -84,5 +118,17 @@ export default function LoginPage() {
         </form>
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 size={32} className="animate-spin text-green-500" />
+      </div>
+    }>
+      <LoginForm />
+    </Suspense>
   )
 }
