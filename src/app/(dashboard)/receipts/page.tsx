@@ -32,7 +32,7 @@ export default function ReceiptsPage() {
 
   function getPublicUrl(filepath: string) {
     const { data } = supabase.storage
-      .from("financeiro-proofs")
+      .from("cashflow-proofs")
       .getPublicUrl(filepath)
     return data.publicUrl
   }

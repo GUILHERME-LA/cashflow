@@ -218,7 +218,7 @@ export default function ImportPage() {
           const filePath = `receipts/${fileName}`
 
           const { error: uploadErr } = await supabase.storage
-            .from("financeiro-proofs")
+            .from("cashflow-proofs")
             .upload(filePath, row.file, {
               contentType: row.file.type,
               cacheControl: "3600",

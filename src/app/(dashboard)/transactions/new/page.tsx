@@ -177,7 +177,7 @@ function NewTransactionForm() {
         const filePath = `receipts/${fileName}`
 
         const { error: uploadErr } = await supabase.storage
-          .from("financeiro-proofs")
+          .from("cashflow-proofs")
           .upload(filePath, file, {
             contentType: file.type,
             cacheControl: "3600",
