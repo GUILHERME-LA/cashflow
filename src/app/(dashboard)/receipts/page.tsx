@@ -9,6 +9,7 @@ import type { ProofFile } from "@/types"
 export default function ReceiptsPage() {
   const [files, setFiles] = useState<ProofFile[]>([])
   const [loading, setLoading] = useState(true)
+  const [downloading, setDownloading] = useState<string | null>(null)
   const supabase = createClient()
 
   useEffect(() => {
@@ -35,6 +36,30 @@ export default function ReceiptsPage() {
       .from("cashflow-proofs")
       .getPublicUrl(filepath)
     return data.publicUrl
+  }
+
+  async function handleDownload(file: ProofFile) {
+    setDownloading(file.id)
+    try {
+      const { data, error } = await supabase.storage
+        .from("cashflow-proofs")
+        .download(file.filepath)
+
+      if (error) throw error
+
+      const url = URL.createObjectURL(data)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = file.filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error("Erro ao baixar:", err)
+    } finally {
+      setDownloading(null)
+    }
   }
 
   return (
@@ -84,14 +109,18 @@ export default function ReceiptsPage() {
                     <Eye size={12} />
                     Ver
                   </a>
-                  <a
-                    href={url}
-                    download={file.filename}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-50 text-xs text-gray-600 hover:bg-gray-100 transition-colors"
+                  <button
+                    onClick={() => handleDownload(file)}
+                    disabled={downloading === file.id}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-50 text-xs text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50"
                   >
-                    <Download size={12} />
+                    {downloading === file.id ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <Download size={12} />
+                    )}
                     Baixar
-                  </a>
+                  </button>
                 </div>
               </div>
             )
