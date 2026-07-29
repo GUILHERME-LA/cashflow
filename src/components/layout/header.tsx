@@ -25,7 +25,7 @@ const navItems = [
   { href: "/import", label: "Importar", icon: Upload },
   { href: "/receipts", label: "Comprovantes", icon: FileImage },
   { href: "/reports", label: "Relatórios", icon: FileBarChart },
-  { href: "/audit", label: "Auditoria", icon: History },
+  { href: "/audit", label: "Histórico", icon: History },
 ]
 
 export function Header() {

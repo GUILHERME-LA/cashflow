@@ -70,7 +70,7 @@ export default function HomePage() {
             <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-red-500/10 mb-4">
               <Shield size={24} className="text-red-500" />
             </div>
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Auditoria</h3>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Histórico</h3>
             <p className="text-sm text-gray-500">
               Histórico completo de todas as ações. Tudo que for feito fica registrado para consulta.
             </p>
